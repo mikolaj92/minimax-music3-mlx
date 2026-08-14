@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+/weights/
+/MiniMax-Music3/
+*.wav
+.DS_Store
+.mlx_cache/
