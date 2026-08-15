@@ -160,6 +160,7 @@ def generate_frame_hiddens(
     text_ids: mx.array,
     max_frames: int,
     seed: int = 0,
+    progress_callback=None,
 ) -> mx.array:
     """Run the official AR loop and return ``[1, frames, num_codebooks * H]``."""
     mx.random.seed(seed)
@@ -185,6 +186,8 @@ def generate_frame_hiddens(
             break
         if frame_index > 0:
             frames.append(result.frame_hidden)
+            if progress_callback is not None:
+                progress_callback("ar", len(frames), max_frames)
             if frame_index == 1 or frame_index % 10 == 0 or len(frames) >= max_frames:
                 print(f"  AR frame {len(frames)}/{max_frames}", flush=True)
             if len(frames) >= max_frames:
