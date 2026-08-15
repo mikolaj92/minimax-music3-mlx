@@ -10,3 +10,8 @@ build/
 *.wav
 .DS_Store
 .mlx_cache/
+.build/
+.swiftpm/
+xcuserdata/
+.upload-staging/
+/out/

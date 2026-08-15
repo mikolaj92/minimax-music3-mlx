@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import mlx.core as mx
+import mlx.nn as nn
 
 from .config import Music3Config
 from .depth import RVQDepthDecoder
@@ -14,9 +15,52 @@ from .fusion import ConditionEncoder
 from .tiny import Music3Modules, make_qwen3
 from .vocoder import Vocoder
 
+# Large modules quantized by the weight-export path. Vocoder / condition encoder stay bf16.
+QUANTIZED_COMPONENT_NAMES = (
+    "language_model",
+    "transformer",
+    "rvq_depth_decoder",
+)
+
 
 def _read_json(path: Path) -> dict:
     return json.loads(path.read_text()) if path.exists() else {}
+
+
+def linear_quant_predicate(group_size: int):
+    """Quantize Linear weights whose last dim is divisible by group_size.
+
+    Embeddings, norms, and convs stay unquantized. Load must use the same
+    predicate: construct → quantize(empty) → load_weights (quantized Linear
+    keys include ``scales`` / ``biases``).
+    """
+
+    def predicate(_path: str, module) -> bool:
+        if not isinstance(module, nn.Linear):
+            return False
+        return int(module.weight.shape[-1]) % group_size == 0
+
+    return predicate
+
+
+def apply_linear_quantize(module, bits: int, group_size: int = 64) -> None:
+    nn.quantize(
+        module,
+        bits=bits,
+        group_size=group_size,
+        class_predicate=linear_quant_predicate(group_size),
+    )
+
+
+def quantization_meta(root: Path) -> dict:
+    meta = _read_json(root / "mlx_config.json")
+    if not meta.get("quantized"):
+        return {}
+    return {
+        "bits": int(meta["bits"]),
+        "group_size": int(meta.get("group_size", 64)),
+        "modules": tuple(meta.get("quantize_modules", QUANTIZED_COMPONENT_NAMES)),
+    }
 
 
 def config_from_converted(root: Path) -> Music3Config:
@@ -100,10 +144,14 @@ def _load_component(module, path: Path) -> None:
 def load_converted_modules(root: str | Path) -> Music3Modules:
     root = Path(root)
     config = config_from_converted(root)
+    quant = quantization_meta(root)
+    quant_names = set(quant.get("modules", ()))
 
     def _build(name: str, factory):
         folder = root / name
         module = factory()
+        if quant and name in quant_names:
+            apply_linear_quantize(module, bits=quant["bits"], group_size=quant["group_size"])
         if folder.exists():
             print(f"loading {name}...")
             _load_component(module, folder)
