@@ -45,6 +45,7 @@ def _run_flow(
     frame_hiddens: mx.array,
     num_inference_steps: int,
     seed: int,
+    progress_callback=None,
 ) -> mx.array:
     """Denoise overlapping 200-frame windows and return a stitched stereo waveform ``[B, 2, S]``."""
     config = modules.config
@@ -72,6 +73,8 @@ def _run_flow(
         previous_latent = latents[..., carry_start:carry_end]
         previous_condition = condition[:, carry_start:carry_end]
         waves.append(modules.vocoder(latents))
+        if progress_callback is not None:
+            progress_callback("dit", len(waves), len(starts))
     cropped = [_crop_waveform(wave, index, len(waves)) for index, wave in enumerate(waves)]
     return mx.concatenate(cropped, axis=-1)
 
@@ -83,6 +86,7 @@ def generate_audio(
     audio_duration: float = 0.2,
     num_inference_steps: int = 2,
     seed: int = 0,
+    progress_callback=None,
 ) -> tuple[np.ndarray, int]:
     """Return ``(waveform [samples, 2], sample_rate)``."""
     if audio_duration <= 0:
@@ -102,10 +106,11 @@ def generate_audio(
         text_ids,
         max_frames=max_frames,
         seed=seed,
+        progress_callback=progress_callback,
     )
     mx.eval(frame_hiddens)
     print(f"flow-matching DiT ({num_inference_steps} steps, {len(chunk_starts(frame_hiddens.shape[1]))} windows)...", flush=True)
-    audio = _run_flow(modules, frame_hiddens, num_inference_steps, seed)
+    audio = _run_flow(modules, frame_hiddens, num_inference_steps, seed, progress_callback=progress_callback)
     mx.eval(audio)
     wave = np.asarray(audio[0].astype(mx.float32))  # [2, samples]
     wave = np.clip(wave, -1.0, 1.0).T  # [samples, 2]
